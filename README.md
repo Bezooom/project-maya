@@ -1,51 +1,120 @@
-<h1 align="center">Hy4-flash Uncensored on your RTX 3090s</h1>
+<a id="readme-top"></a>
 
-<p align="center"><b>Tencent's 220B MoE with 256K context, vision and MTP. 251 tok/s on 4 cards, 70 to 104 on 2, and it runs on ONE 3090 in a 64 GB box.</b></p>
+<div align="center">
+
+<h1 align="center">Hy4-flash Uncensored на 2×RTX 3090 без P2P</h1>
 
 <p align="center">
-<a href="docs/HY4-FLASH.md"><b>Read the guide</b></a> ·
-<a href="https://huggingface.co/alesha-pro/Hy4-flash-Uncensored-GGUF"><b>Weights on Hugging Face</b></a> ·
-<a href="docs/HY4-FLASH.md#quick-start"><b>Quick start</b></a>
+  Форк <a href="https://github.com/alesha-pro/project-maya/tree/hy4-flash">alesha-pro/project-maya</a>: 220B MoE Tencent Hy4-flash, 262144 контекста, vision, MTP и abliteration-вектор на двух картах, даже если чипсет не умеет P2P.
+  <br />
+  <br />
+  <a href="https://github.com/alesha-pro/project-maya/pull/2"><strong>Pull Request »</strong></a> ·
+  <a href="https://huggingface.co/alesha-pro/Hy4-flash-Uncensored-GGUF"><strong>Веса на Hugging Face</strong></a> ·
+  <a href="docs/HY4-FLASH.md"><strong>Upstream-гид</strong></a>
 </p>
 
-> **Start with [docs/HY4-FLASH.md](docs/HY4-FLASH.md).** Speeds, memory per setup, how to switch the uncensored vector on and off, and every config.
->
-> Boards without P2P (for example a Xeon E5 v4 / C612 with two RTX 3090s) work too: the engine falls back to host-mapped exchange buffers. See [Two GPUs without P2P](docs/HY4-FLASH.md#two-gpus-without-p2p).
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-Linux_x86__64-0A66C2?style=for-the-badge" alt="Platform" />
+  <img src="https://img.shields.io/badge/GPU-2x_RTX_3090-76B900?style=for-the-badge" alt="GPU" />
+  <img src="https://img.shields.io/badge/Context-262144-8b5cf6?style=for-the-badge" alt="Context" />
+  <img src="https://img.shields.io/badge/Transport-host--mapped-f59e0b?style=for-the-badge" alt="Transport" />
+  <img src="https://img.shields.io/badge/License-Tencent_Hy-blue?style=for-the-badge" alt="License" />
+</p>
 
-| | 4x RTX 3090 | 2x RTX 3090 | 1x RTX 3090 |
-|---|---:|---:|---:|
-| Decode, tok/s | 176 to 251 | 70 to 104 (IQ2: up to 123) | 37 to 54 (IQ2: up to 68) |
-| Prefill, tok/s | 2947 | 1225 (IQ2: 1999) | 1510 |
-| RAM | about 60 GiB | 137 GiB | 137 GiB, or 45 GiB with IQ2 + NVMe |
+</div>
 
-## What you get
+<details open>
+<summary><b>📑 Содержание</b></summary>
 
-* **`maya-hy4f`**, an engine for [Tencent Hy4-flash](https://huggingface.co/tencent/Hy4-flash): the full 262144 token context, image input, MTP speculative decoding, OpenAI and Anthropic APIs, tool calls.
-* **1, 2 or 4 cards from the same weights.** What doesn't fit in VRAM stays in RAM and the CPU computes it. 2 cards agree with 4 as closely as two 4 card runs agree with each other.
-* **Uncensored with one file.** A 4 MB refusal vector the engine projects out of the model as it runs: refusals with thinking off drop from 139 to 32 out of 146, with thinking on from 22 to 3 out of 24. Delete one config line and you have the stock model again.
-* **Small machines too.** An IQ2 trunk and an Engram table read from NVMe bring one card down to 45 GiB of RAM.
+- [📖 О проекте](#-о-проекте)
+- [🧩 Что даёт патч](#-что-даёт-патч)
+- [⚙️ Как работает транспорт](#-как-работает-транспорт)
+- [🚀 Быстрый старт](#-быстрый-старт)
+- [📊 Замеры](#-замеры)
+- [⚠️ Ограничения](#-ограничения)
+- [🔗 Ссылки](#-ссылки)
+- [🙏 Благодарности и лицензия](#-благодарности-и-лицензия)
 
-## Quick start
+</details>
 
-```bash
-git clone -b hy4-flash https://github.com/alesha-pro/project-maya && cd project-maya
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_CUDA=ON \
-  -DCMAKE_CUDA_ARCHITECTURES=86 -DCUDAToolkit_ROOT=/usr/local/cuda-12.8 \
-  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc -DSTRATA_BUILD_TESTS=OFF
-cmake --build build -j 24 --target maya-hy4f
-hf download alesha-pro/Hy4-flash-Uncensored-GGUF --exclude "Hy4-flash-IQ2_XXS-*" --local-dir /models/Hy4-flash-Uncensored-GGUF
-# set exe and cwd in the config to this checkout, then
-python -m serve.server --engine maya --config docs/hy4-flash/hy4f-2gpu.json --host 127.0.0.1 --port 18000
+## 📖 О проекте
+
+> **Две RTX 3090 на плате, где P2P не поддерживается, всё равно дают tensor parallel: обмен активациями идёт через host-mapped память по PCIe, а не через peer-доступ к VRAM.**
+
+**Проверено на:** Ubuntu, 2×RTX 3090, Xeon E5-2696 v4, 126 ГБ DDR4-2400, IQ2_XXS trunk, 262144 контекста, Engram на NVMe, thinking off.
+
+Это форк `alesha-pro/project-maya` (ветка `hy4-flash`) с локальным патчем. Upstream требует P2P для двух карт и на чипсетах с `CNS (Chipset not supported)` падает с `no P2P between GPUs 0 and 1`. Патч оставляет машины с P2P на прежнем device-пути, а без P2P переключает обмен на host-mapped буферы. PR: [#2](https://github.com/alesha-pro/project-maya/pull/2).
+
+## 🧩 Что даёт патч
+
+| Возможность | Состояние |
+|---|---|
+| 2 GPU без P2P (CNS), tensor parallel | работает |
+| P2P-путь на машинах автора | сохранён, но здесь не перепроверялся |
+| Uncensored-вектор (`HY4F_ABLATE`) | включён в конфиге |
+| Engram `O_DIRECT` на 2 GPU | работает, таблица 63 ГБ остаётся на NVMe |
+| 262144 контекста | работает |
+| Сборка nvcc 12.4 + gcc 12 | исправлена: `xmmintrin.h` вместо `immintrin.h` |
+
+## ⚙️ Как работает транспорт
+
+При загрузке движок проверяет `cudaDeviceCanAccessPeer` для каждой пары карт. Если P2P есть, остаются device-буферы, `cudaDeviceEnablePeerAccess` и peer-копии. Если нет, буферы и флаги обмена (`all-reduce`, attention combine, batch, decode) выделяются через `cudaHostAlloc(Mapped|Portable)`, и обе карты читают их по PCIe через UVA. Ядра уже используют `__threadfence_system()` и `volatile`-флаги, поэтому менять их не пришлось. Копии KV-мирроров при смене префикса идут через pinned host buffer.
+
+```mermaid
+flowchart LR
+    A[GPU0 layers] -->|host-mapped wire buffer| B[GPU1 layers]
+    B -->|all-reduce result| A
+    A --> C[CPU lane: experts + Engram rows]
+    B --> C
 ```
 
-Configs for 4, 2 and 1 card are in [`docs/hy4-flash/`](docs/hy4-flash/). The full walkthrough, with the IQ2 and NVMe options, is in the [guide](docs/HY4-FLASH.md#quick-start).
+## 🚀 Быстрый старт
 
-## About this repo
+```bash
+git clone -b hy4-flash https://github.com/Bezooom/project-maya
+cd project-maya
+git checkout bezooom/readme
 
-This is a fork of [Project Maya](https://github.com/mw00/project-maya) (v1.1.66), the engine family by Peasant Smith ([@mw00](https://github.com/mw00)) and the Maya contributors, which grew out of [Strata](https://github.com/Niko1221/Strata) by Niko1221. The `hy4-flash` branch adds the Hy4-flash engine (`src/hy4f/`), its offload modes and the refusal vector support. The rest of Maya (GLM-5.3, DeepSeek-V4.1-Flash, MiniMax-M3.1-Flash and the app around them) is still in the tree but isn't maintained here: for those models use [upstream Maya](https://github.com/mw00/project-maya) and its README.
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_CUDA=ON \
+  -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_CUDA_COMPILER=/usr/bin/nvcc \
+  -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 \
+  -DCMAKE_CUDA_HOST_COMPILER=g++-12 -DSTRATA_BUILD_TESTS=OFF -DGGML_NATIVE=OFF
+cmake --build build -j 22 --target maya-hy4f
+```
 
-Weights: Tencent Hy4-flash, quantized by [AngelSlim](https://huggingface.co/AngelSlim/Hy4-flash-GGUF) (Q3_K) and [AtomicChat](https://huggingface.co/AtomicChat/Hy4-flash-GGUF) (IQ2 experts), packaged with a requantized MTP layer in [alesha-pro/Hy4-flash-Uncensored-GGUF](https://huggingface.co/alesha-pro/Hy4-flash-Uncensored-GGUF).
+Веса: IQ2_XXS набор (trunk 51 ГБ + Engram 63 ГБ), `mmproj`, вектор и `routing-profile.txt` из [alesha-pro/Hy4-flash-Uncensored-GGUF](https://huggingface.co/alesha-pro/Hy4-flash-Uncensored-GGUF). Конфиг: `docs/hy4-flash/hy4f-2gpu-iq2-nvme.json`, порт 18000.
 
-## License
+На этом стенде запуск и остановка обёрнуты в `~/start_hyf.sh` и `~/stop_ai.sh`; чат открывается на `http://127.0.0.1:18001/`.
 
-The code is MIT, as upstream ([LICENSE](LICENSE)). The model weights are under the [Tencent Hy License 1.0](https://huggingface.co/alesha-pro/Hy4-flash-Uncensored-GGUF/blob/main/LICENSE).
+## 📊 Замеры
+
+2×RTX 3090, Xeon E5-2696 v4, 126 ГБ, IQ2_XXS, 262144 контекста, Engram на NVMe, thinking off:
+
+| Прогон | tok/s |
+|---|---:|
+| первый ответ | 54.6 до 65.2 |
+| прогретый | 79.5 |
+| прогретый | 87.3 |
+| прогретый | 95.3 |
+| прогретый | 100.0 |
+
+RSS около 61 ГиБ, VmSwap движка 344 МБ. Для сравнения: тот же бинарник на одной карте даёт 26–40 tok/s.
+
+## ⚠️ Ограничения
+
+- Протестированы только две карты и набор IQ2_XXS. Четыре GPU и Q3_K не проверялись.
+- Host-транспорт добавляет задержку PCIe; на машине с рабочим P2P должен оставаться device-путь.
+- Длинный prefill (десятки тысяч токенов) не замерялся.
+- Engram direct читают оба шарда; общий кэш строк гасит повторное чтение.
+- Это локальный патч, не upstream; поведение после merge может отличаться.
+
+## 🔗 Ссылки
+
+- PR: https://github.com/alesha-pro/project-maya/pull/2
+- Upstream-гид: [docs/HY4-FLASH.md](docs/HY4-FLASH.md)
+- Веса: https://huggingface.co/alesha-pro/Hy4-flash-Uncensored-GGUF
+- Патч: `git diff 7d04c8d^..7d04c8d`
+
+## 🙏 Благодарности и лицензия
+
+Hy4-flash: Tencent. Q3_K: AngelSlim. IQ2 experts: AtomicChat. Движок и гид: [alesha-pro/project-maya](https://github.com/alesha-pro/project-maya), выросший из [Strata](https://github.com/Niko1221/Strata). Лицензия модели: [Tencent Hy License 1.0](https://huggingface.co/alesha-pro/Hy4-flash-Uncensored-GGUF/blob/main/LICENSE).
